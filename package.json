@@ -1,0 +1,12 @@
+{
+  "name": "heyman-academy-server",
+  "version": "1.0.0",
+  "description": "API proxy server for Heyman Academy brand tool",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
