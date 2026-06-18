@@ -15,12 +15,10 @@ const ALLOWED = [
 ];
 
 function cors(req) {
-  const origin = req.headers["origin"] || "";
-  const allowed = ALLOWED.includes(origin) ? origin : "*";
   return {
-    "Access-Control-Allow-Origin": allowed,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
     "Content-Type": "application/json",
   };
 }
@@ -84,7 +82,7 @@ const server = http.createServer(async (req, res) => {
     const getPath = new URL(req.url, "http://localhost").pathname;
     if (getPath === "/health") {
       res.writeHead(200, headers);
-      res.end(JSON.stringify({ status: "ok", key: ANTHROPIC_KEY ? "set" : "missing" }));
+      res.end(JSON.stringify({ status: "ok", key: ANTHROPIC_KEY ? "set" : "missing", endpoints: ["/health", "/check-email", "/search", "/generate"] }));
       return;
     }
   }
