@@ -4,12 +4,11 @@ const https = require("https");
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || "";
 const PORT = process.env.PORT || 3000;
 
-// ── Allowed origins (add your Wix URL here) ──────────────────────
 const ALLOWED = [
   "https://www.heymanacademy.com",
   "https://heymanacademy.com",
   "http://localhost",
-  "null", // Wix preview
+  "null",
 ];
 
 function cors(req) {
@@ -42,11 +41,8 @@ function callAnthropic(payload) {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch (e) {
-          reject(new Error("Invalid JSON from Anthropic: " + data.slice(0, 200)));
-        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error("Invalid JSON: " + data.slice(0, 200))); }
       });
     });
     req.on("error", reject);
@@ -56,10 +52,7 @@ function callAnthropic(payload) {
 }
 
 function extractText(content) {
-  return (content || [])
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("");
+  return (content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
 }
 
 function extractJSON(text) {
@@ -71,28 +64,26 @@ function extractJSON(text) {
 const server = http.createServer(async (req, res) => {
   const headers = cors(req);
 
-  if (req.method === "OPTIONS") {
-    res.writeHead(204, headers);
-    res.end();
-    return;
+  if (req.method === "OPTIONS") { res.writeHead(204, headers); res.end(); return; }
+
+  // GET allowed for /health only
+  if (req.method === "GET") {
+    const gp = new URL(req.url, "http://localhost").pathname;
+    if (gp === "/health") {
+      res.writeHead(200, headers);
+      res.end(JSON.stringify({ status: "ok", key: ANTHROPIC_KEY ? "set" : "missing" }));
+      return;
+    }
+    res.writeHead(405, headers); res.end(JSON.stringify({ error: "Method not allowed" })); return;
   }
 
-  if (req.method !== "POST") {
-    res.writeHead(405, headers);
-    res.end(JSON.stringify({ error: "Method not allowed" }));
-    return;
-  }
+  if (req.method !== "POST") { res.writeHead(405, headers); res.end(JSON.stringify({ error: "Method not allowed" })); return; }
 
   let rawBody = "";
   for await (const chunk of req) rawBody += chunk;
   let body;
-  try {
-    body = JSON.parse(rawBody);
-  } catch {
-    res.writeHead(400, headers);
-    res.end(JSON.stringify({ error: "Invalid JSON body" }));
-    return;
-  }
+  try { body = JSON.parse(rawBody); }
+  catch { res.writeHead(400, headers); res.end(JSON.stringify({ error: "Invalid JSON body" })); return; }
 
   const path = new URL(req.url, "http://localhost").pathname;
 
@@ -100,66 +91,32 @@ const server = http.createServer(async (req, res) => {
     const { skill = "", audience = "", values = "" } = body;
     try {
       const data = await callAnthropic({
-        model: "claude-sonnet-4-6",
-        max_tokens: 800,
+        model: "claude-sonnet-4-6", max_tokens: 800,
         system: 'You are a market research assistant. Output ONLY valid JSON with key "search_results". No other text.',
         tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [
-          {
-            role: "user",
-            content: `Search the web and return real findings as JSON.
-Do THREE searches:
-1. "${skill} creator viral youtube 2025 high views"
-2. "${skill} instagram reels trending 2025 ${audience}"
-3. "${skill} personal brand sub niche ${values} 2025 trending"
-Return: {"search_results":["finding with platform, title, creator, why it worked",...up to 12 findings]}`,
-          },
-        ],
+        messages: [{ role: "user", content: `Search and return JSON.\n1. "${skill} creator viral youtube 2025"\n2. "${skill} instagram reels trending 2025 ${audience}"\n3. "${skill} personal brand sub niche ${values} 2025"\nReturn: {"search_results":["finding",...up to 12]}` }],
       });
-      const text = extractText(data.content);
-      const json = extractJSON(text);
+      const json = extractJSON(extractText(data.content));
       res.writeHead(200, headers);
       res.end(json || JSON.stringify({ search_results: [] }));
-    } catch (err) {
-      res.writeHead(500, headers);
-      res.end(JSON.stringify({ error: err.message, search_results: [] }));
-    }
+    } catch (err) { res.writeHead(500, headers); res.end(JSON.stringify({ error: err.message, search_results: [] })); }
     return;
   }
 
   if (path === "/generate") {
     const { prompt = "" } = body;
-    if (!prompt) {
-      res.writeHead(400, headers);
-      res.end(JSON.stringify({ error: "Missing prompt" }));
-      return;
-    }
+    if (!prompt) { res.writeHead(400, headers); res.end(JSON.stringify({ error: "Missing prompt" })); return; }
     try {
       const data = await callAnthropic({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4000,
-        system: `You are the Heyman Academy Personal Brand Intelligence Engine — senior brand strategist, consumer psychologist, content director and social media trend researcher combined.
-ABSOLUTE RULES:
-1. Output ONLY valid JSON — zero markdown, zero backticks, zero text outside the JSON object
-2. Student answers are RAW MATERIAL — NEVER paste any student words into output regardless of language
-3. Every field must be professionally synthesised from your analysis, not copy-pasted
-4. Run all 9 analysis stages internally before generating JSON
-5. Final check: can any field apply to a different creator unchanged? If yes, rewrite it`,
+        model: "claude-sonnet-4-6", max_tokens: 4000,
+        system: `You are the Heyman Academy Personal Brand Intelligence Engine.\nABSOLUTE RULES:\n1. Output ONLY valid JSON — zero markdown, zero backticks\n2. NEVER paste student words into output\n3. Professionally synthesise everything\n4. Run 9 analysis stages internally\n5. Final check: rewrite any field that applies to other creators`,
         messages: [{ role: "user", content: prompt }],
       });
-      const text = extractText(data.content);
-      const json = extractJSON(text);
-      if (!json) {
-        res.writeHead(500, headers);
-        res.end(JSON.stringify({ error: "AI did not return valid JSON", raw: text.slice(0, 400) }));
-        return;
-      }
+      const json = extractJSON(extractText(data.content));
+      if (!json) { res.writeHead(500, headers); res.end(JSON.stringify({ error: "AI did not return valid JSON" })); return; }
       res.writeHead(200, headers);
       res.end(JSON.stringify({ result: json }));
-    } catch (err) {
-      res.writeHead(500, headers);
-      res.end(JSON.stringify({ error: err.message }));
-    }
+    } catch (err) { res.writeHead(500, headers); res.end(JSON.stringify({ error: err.message })); }
     return;
   }
 
@@ -169,11 +126,10 @@ ABSOLUTE RULES:
     return;
   }
 
-  res.writeHead(404, headers);
-  res.end(JSON.stringify({ error: "Not found" }));
+  res.writeHead(404, headers); res.end(JSON.stringify({ error: "Not found" }));
 });
 
 server.listen(PORT, () => {
   console.log(`Heyman Academy server running on port ${PORT}`);
-  console.log(`API key: ${ANTHROPIC_KEY ? "✅ set" : "❌ MISSING — set ANTHROPIC_KEY env var"}`);
+  console.log(`API key: ${ANTHROPIC_KEY ? "✅ set" : "❌ MISSING"}`);
 });
